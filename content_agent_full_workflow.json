@@ -1,0 +1,328 @@
+
+{
+  "nodes": [
+    {
+      "name": "Telegram Trigger Create",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [100, 100],
+      "parameters": {
+        "updateFields": {
+          "commands": [{ "command": "/createcontent" }]
+        }
+      }
+    },
+    {
+      "name": "Telegram Trigger AnalyzeSite",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "updateFields": {
+          "commands": [{ "command": "/analyzeSite" }]
+        }
+      }
+    },
+    {
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 500],
+      "parameters": {
+        "path": "webhook/content",
+        "httpMethod": "POST"
+      }
+    },
+    {
+      "name": "Read Clients",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 1,
+      "position": [300, 100],
+      "parameters": {
+        "operation": "read",
+        "sheetId": "<SHEET_ID>",
+        "range": "Clients!A:D"
+      }
+    },
+    {
+      "name": "Parse Client",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 100],
+      "parameters": {
+        "functionCode": "const { id, name, niche, driveFolder } = items[0].json;\nreturn [{ json: { clientId: id, name, niche, driveFolder } }];"
+      }
+    },
+    {
+      "name": "URL Parser",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [300, 300],
+      "parameters": {
+        "functionCode": "const text = $json.message?.text || $json.url;\nconst url = text.split(' ')[1] || text;\nreturn [{ json: { siteUrl: url } }];"
+      }
+    },
+    {
+      "name": "Site Scraper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "parameters": {
+        "url": "={{$json.siteUrl}}",
+        "responseFormat": "string"
+      }
+    },
+    {
+      "name": "HTML Extract",
+      "type": "n8n-nodes-base.htmlExtract",
+      "typeVersion": 1,
+      "position": [700, 300],
+      "parameters": {
+        "html": "={{$node[\"Site Scraper\"].data}}",
+        "rules": [
+          { "tag": "title", "attribute": "", "name": "title" },
+          { "tag": "meta[name='description']", "attribute": "content", "name": "description" },
+          { "tag": "h1", "attribute": "", "name": "h1" }
+        ]
+      }
+    },
+    {
+      "name": "Build Competitor Queries",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 200],
+      "parameters": {
+        "functionCode": "const niche = $json.niche;\nconst domain = new URL($json.siteUrl).hostname;\nreturn [{ json: { query1: `site:${domain}`, query2: `site:instagram.com ${niche}` } }];"
+      }
+    },
+    {
+      "name": "Google CSE Main",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1100, 200],
+      "parameters": {
+        "url": "https://www.googleapis.com/customsearch/v1",
+        "method": "GET",
+        "qs": {
+          "key": "<GOOGLE_API_KEY>",
+          "cx": "<CSE_ID>",
+          "q": "={{$json.query1}}",
+          "num": 10
+        },
+        "options": { "batchSize": 10, "batchInterval": 1000 }
+      }
+    },
+    {
+      "name": "Extract Links Main",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1300, 200],
+      "parameters": {
+        "functionCode": "const links = [].concat(...items.map(i => i.json.items || [])).map(i=>i.link);\nreturn [{ json: { links } }];"
+      }
+    },
+    {
+      "name": "Google CSE Niche",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1100, 400],
+      "parameters": {
+        "url": "https://www.googleapis.com/customsearch/v1",
+        "method": "GET",
+        "qs": {
+          "key": "<GOOGLE_API_KEY>",
+          "cx": "<CSE_ID>",
+          "q": "={{$json.query2}}",
+          "num": 10
+        },
+        "options": { "batchSize": 10, "batchInterval": 1000 }
+      }
+    },
+    {
+      "name": "Extract Links Niche",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1300, 400],
+      "parameters": {
+        "functionCode": "const links = [].concat(...items.map(i => i.json.items || [])).map(i=>i.link);\nreturn [{ json: { links } }];"
+      }
+    },
+    {
+      "name": "Merge Links",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 1,
+      "position": [1500, 300],
+      "parameters": {
+        "mode": "append",
+        "append": { "items": "all" }
+      }
+    },
+    {
+      "name": "Prepare Competitor Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1700, 300],
+      "parameters": {
+        "functionCode": "return [{ json: { messages: [ { role:'system', content:'Ты — эксперт по анализу конкурентов и бренда.' }, { role:'user', content:`Сайт: ${$json.siteUrl}\\nНиша: ${$json.niche}\\nСсылки:\\n${$json.links.join('\\n')}` } ] } }];"
+      }
+    },
+    {
+      "name": "OpenRouter Competitor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1900, 300],
+      "parameters": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "method": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\"model\":\"mistral/mixtral-8x7b\",\"messages\":$json.messages}"
+      },
+      "credentials": {
+        "http": { "id": "<OPENROUTER_CRED_ID>" }
+      }
+    },
+    {
+      "name": "Parse Competitor Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2100, 300],
+      "parameters": {
+        "functionCode": "const content = $json.choices[0].message.content.split('\\n\\n'); return [{ json: { analysis: content } }];"
+      }
+    },
+    {
+      "name": "Content Calendar Builder",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2300, 300],
+      "parameters": {
+        "functionCode": "const topics = $node['Parse Competitor Analysis'].json.analysis; return [{ json: { messages: [ { role:'system', content:'Ты — SMM-стратег.' }, { role:'user', content:`На основе анализа тем ${topics.join(', ')} составь контент-план на 4 недели.` } ] } }];"
+      }
+    },
+    {
+      "name": "OpenRouter Calendar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2500, 300],
+      "parameters": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "method": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\"model\":\"mistral/mixtral-8x7b\",\"messages\":$json.messages}"
+      },
+      "credentials": {
+        "http": { "id": "<OPENROUTER_CRED_ID>" }
+      }
+    },
+    {
+      "name": "Parse Calendar Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2700, 300],
+      "parameters": {
+        "functionCode": "const plan = $json.choices[0].message.content; return [{ json: { contentPlan: plan, chatId: $node['Parse Command']?.json.chatId } }];"
+      }
+    },
+    {
+      "name": "Cron Publish",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [2900, 100],
+      "parameters": {
+        "triggerTimes": [ { "hour": 9, "minute": 0 } ]
+      }
+    },
+    {
+      "name": "Post Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [3100, 100],
+      "parameters": {
+        "chatId": "=@yourchannel",
+        "text": "={{$node['Parse Calendar Response'].json.contentPlan}}"
+      }
+    },
+    {
+      "name": "Post VK",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [3100, 300],
+      "parameters": {
+        "url": "https://api.vk.com/method/wall.post",
+        "method": "POST",
+        "qs": { "access_token": "<VK_TOKEN>", "v": "5.131" },
+        "bodyParametersJson": "={\"owner_id\":<VK_GROUP_ID>,\"message\":$node['Parse Calendar Response'].json.contentPlan}"
+      }
+    },
+    {
+      "name": "Post Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+      "position": [3100, 500],
+      "parameters": {
+        "url": "https://graph.facebook.com/<IG_BUSINESS_ID>/media",
+        "method": "POST",
+        "qs": { "access_token": "<IG_TOKEN>" },
+        "bodyParametersJson": "={\"media_type\":\"CAROUSEL\",\"caption\":$node['Parse Calendar Response'].json.contentPlan}"
+      }
+    },
+    {
+      "name": "Analytics Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2900, 500],
+      "parameters": {
+        "url": "https://graph.facebook.com/<IG_BUSINESS_ID>/insights",
+        "method": "GET",
+        "qs": { "access_token": "<IG_TOKEN>" }
+      }
+    },
+    {
+      "name": "Learning Module",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [3300, 300],
+      "parameters": {
+        "functionCode": "const stats = $node['Analytics Fetch'].json.data; return [{ json: { updatedPlan: `Лучшие темы: ${stats[0].values[0].value}` } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger Create": { "main": [[ { "node": "Read Clients", "type": "main", "index": 0 } ]] },
+    "Read Clients": { "main": [[ { "node": "Parse Client", "type": "main", "index": 0 } ]] },
+    "Parse Client": { "main": [[ { "node": "Build Competitor Queries", "type": "main", "index": 0 } ]] },
+    "Telegram Trigger AnalyzeSite": { "main": [[ { "node": "URL Parser", "type": "main", "index": 0 } ]] },
+    "Webhook Trigger": { "main": [[ { "node": "URL Parser", "type": "main", "index": 0 } ]] },
+    "URL Parser": { "main": [[ { "node": "Site Scraper", "type": "main", "index": 0 } ]] },
+    "Site Scraper": { "main": [[ { "node": "HTML Extract", "type": "main", "index": 0 } ]] },
+    "HTML Extract": { "main": [[ { "node": "Build Competitor Queries", "type": "main", "index": 0 } ]] },
+    "Build Competitor Queries": {
+      "main": [
+        [ { "node": "Google CSE Main", "type": "main", "index": 0 }],
+        [ { "node": "Google CSE Niche", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google CSE Main": { "main": [[ { "node": "Extract Links Main", "type": "main", "index": 0 } ]] },
+    "Google CSE Niche": { "main": [[ { "node": "Extract Links Niche", "type": "main", "index": 0 } ]] },
+    "Extract Links Main": { "main": [[ { "node": "Merge Links", "type": "main", "index": 0 } ]] },
+    "Extract Links Niche": { "main": [[ { "node": "Merge Links", "type": "main", "index": 1 } ]] },
+    "Merge Links": { "main": [[ { "node": "Prepare Competitor Prompt", "type": "main", "index": 0 } ]] },
+    "Prepare Competitor Prompt": { "main": [[ { "node": "OpenRouter Competitor", "type": "main", "index": 0 } ]] },
+    "OpenRouter Competitor": { "main": [[ { "node": "Parse Competitor Analysis", "type": "main", "index": 0 } ]] },
+    "Parse Competitor Analysis": { "main": [[ { "node": "Content Calendar Builder", "type": "main", "index": 0 } ]] },
+    "Content Calendar Builder": { "main": [[ { "node": "OpenRouter Calendar", "type": "main", "index": 0 } ]] },
+    "OpenRouter Calendar": { "main": [[ { "node": "Parse Calendar Response", "type": "main", "index": 0 } ]] },
+    "Parse Calendar Response": { "main": [
+        [ { "node": "Cron Publish", "type": "main", "index": 0 } ],
+        [ { "node": "Post Telegram", "type": "main", "index": 1 } ],
+        [ { "node": "Post VK", "type": "main", "index": 1 } ],
+        [ { "node": "Post Instagram", "type": "main", "index": 1 } ]
+      ]
+    },
+    "Cron Publish": { "main": [[ { "node": "Post Telegram", "type": "main", "index": 0 } ]] },
+    "Post Telegram": { "main": [[ { "node": "Analytics Fetch", "type": "main", "index": 0 } ]] },
+    "Post VK": { "main": [[ { "node": "Analytics Fetch", "type": "main", "index": 0 } ]] },
+    "Post Instagram": { "main": [[ { "node": "Analytics Fetch", "type": "main", "index": 0 } ]] },
+    "Analytics Fetch": { "main": [[ { "node": "Learning Module", "type": "main", "index": 0 } ]] }
+  }
+}
