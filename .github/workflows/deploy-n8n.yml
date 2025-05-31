@@ -1,0 +1,44 @@
+# File: .github/workflows/deploy-n8n.yml
+
+name: Deploy to n8n Cloud
+
+# Будет срабатывать при пуше в ветку main
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Шаг 1. Клонируем репозиторий
+      - uses: actions/checkout@v3
+
+      # Шаг 2. Устанавливаем n8n CLI (нужно для команд workflow:import)
+      - name: Install n8n CLI
+        run: npm install -g n8n
+
+      # Шаг 3. Импортируем обновлённый workflow в облако n8n
+      - name: Import workflow into n8n Cloud
+        env:
+          N8N_URL: ${{ secrets.N8N_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+        run: |
+          n8n workflow:import \
+            --input=My_workflow_3-2.json \
+            --url=$N8N_URL \
+            --apikey=$N8N_API_KEY
+
+      # Шаг 4 (опционально). Прогоняем тестовый запуск (можно убрать, если не нужно)
+      - name: Run test execution
+        if: always()
+        env:
+          N8N_URL: ${{ secrets.N8N_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+        run: |
+          n8n workflow:run \
+            --id="MrtKK1Ot820J16Xk" \
+            --data='{"message":{"text":"анализ мебель instagram","chat":{"id":123456}}}' \
+            --url=$N8N_URL \
+            --apikey=$N8N_API_KEY
